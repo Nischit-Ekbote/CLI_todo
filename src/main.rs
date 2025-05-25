@@ -1,5 +1,6 @@
 use clap::Parser;
-use std::str::FromStr;
+use serde::{Deserialize, Serialize};
+use std::{fs::File, io::{BufReader, BufWriter}, path::Path, str::FromStr};
 
 #[derive(Debug, Clone)]
 struct AddTaskArg {
@@ -15,8 +16,14 @@ impl FromStr for AddTaskArg {
             return Err("Expected format: title,bool".to_string());
         }
         let title = parts[0].trim().to_string();
-        let high_priority = parts[1].trim().parse::<bool>().map_err(|_| "Invalid boolean".to_string())?;
-        Ok(AddTaskArg { title, high_priority })
+        let high_priority = parts[1]
+            .trim()
+            .parse::<bool>()
+            .map_err(|_| "Invalid boolean".to_string())?;
+        Ok(AddTaskArg {
+            title,
+            high_priority,
+        })
     }
 }
 
@@ -31,7 +38,7 @@ struct Args {
     get: bool,
 }
 
-#[derive(Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 struct Task {
     id: usize,
     title: String,
@@ -39,28 +46,68 @@ struct Task {
     done: bool,
 }
 
+#[derive(Serialize, Deserialize)]
+struct Tasks {
+    tasks: Vec<Task>,
+}
+
+impl Tasks {
+    fn load_from_file (path : &str) -> Self {
+        if Path::new(path).exists(){
+            let file = File::open(path).expect("Failed to open file");
+            let reader = BufReader::new(file);
+            serde_json::from_reader(reader).unwrap_or_else(|_| Tasks { tasks: Vec::new() })
+        } else {
+            Tasks {
+            tasks: Vec::new(),
+        }
+        }
+    }
+
+    fn save_to_file (&self, path : &str){
+        let file = File::create(path).expect("Failed to create tasks file");
+        let writer = BufWriter::new(file);
+        serde_json::to_writer_pretty(writer, self).expect("Failed to write tasks to file ");
+    }
+
+    fn next_id(&self) -> usize {
+        self.tasks.iter().map(| t | t.id ). max().unwrap_or(0) + 1
+    }
+}
+
 fn main() {
     let args = Args::parse();
-    let mut tasks: Vec<Task> = Vec::new();
-    let mut id_counter = 0; 
-    
+    let file_name = "tasks.json";
+    let mut tasks = Tasks::load_from_file(file_name);
+
     for task_arg in args.add {
-        tasks.push(Task {
-            id: id_counter,
+        let id = tasks.next_id();
+        tasks.tasks.push(Task {
+            id,
             title: task_arg.title,
             high_priority: task_arg.high_priority,
             done: false,
         });
-        id_counter += 1;
     }
-    
-    for task in &mut tasks {
+
+    for task in &mut tasks.tasks {
         if args.done.contains(&(task.id as u32)) {
             task.done = true;
         }
     }
 
     if args.get {
-        println!("{:#?}", tasks);
+        for task in &tasks.tasks {
+            if !task.done {
+                println!("[{}] {} (priority : {}, id: {})", 
+            if task.done { "✔" } else { " " },
+            task.title,
+            if task.high_priority { "high" } else { "normal" },
+            task.id  
+        )
+            }
+        }
     }
+
+    tasks.save_to_file(file_name);
 }
